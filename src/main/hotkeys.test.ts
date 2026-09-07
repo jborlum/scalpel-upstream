@@ -185,6 +185,34 @@ describe('Escape globalShortcut sync', () => {
     expect(globalShortcutMock.register).toHaveBeenCalledTimes(1)
   })
 
+  it('stays registered through the initial Hyprland dialog focus handoff', async () => {
+    const onEscape = vi.fn()
+    await loadHotkeys(onEscape)
+    hyprlandMockState.overlayActive = true
+    overlayControllerState.targetHasFocus = true
+    overlayMockState.visibilityListener?.(true)
+
+    overlayControllerState.targetHasFocus = false
+    overlayControllerState.events.emit('blur')
+
+    expect(globalShortcutMock.unregister).not.toHaveBeenCalled()
+    lastEscapeCallback()()
+    expect(onEscape).toHaveBeenCalledOnce()
+  })
+
+  it('closes from the uiohook path during the initial Hyprland dialog focus handoff', async () => {
+    const onEscape = vi.fn()
+    await loadHotkeys(onEscape)
+    hyprlandMockState.overlayActive = true
+    overlayControllerState.targetHasFocus = false
+    focusMockState.scalpelBrowserWindowFocused = false
+    overlayMockState.visibilityListener?.(true)
+
+    emitKeydown(ESCAPE_KEYDOWN)
+
+    expect(onEscape).toHaveBeenCalledOnce()
+  })
+
   it('unregisters on overlay hide and on game blur; re-registers on refocus while still visible', async () => {
     const onEscape = vi.fn()
     await loadHotkeys(onEscape)

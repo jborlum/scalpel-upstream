@@ -122,7 +122,7 @@ function firePriceCheck(): void {
  *  registered by syncEscapeShortcut, and the uiohook fallback keydown branch
  *  below). Both can deliver for the same physical press - see DEDUPE_MS. */
 function fireEscape(): void {
-  if (injecting || isTypingInOverlay() || !hotkeyContextIsActive()) return
+  if (injecting || isTypingInOverlay() || !escapeContextIsActive()) return
   const now = Date.now()
   if (now - lastEscapeFireAt < DEDUPE_MS) return
   lastEscapeFireAt = now
@@ -138,7 +138,17 @@ function fireEscape(): void {
  *  Safe to call from anywhere - it's a no-op when the desired state already
  *  matches the registered state. */
 function syncEscapeShortcut(): void {
-  const desired = !!onEscape && overlayVisibleForEscape && OverlayController.targetHasFocus && !hotkeysAreSuspended()
+  // On Hyprland, activating the XWayland overlay takes focus away from PoE
+  // before Electron reliably reports the overlay BrowserWindow as focused.
+  // Keep Escape registered across that handoff; hyprlandInputAllowed() in
+  // escapeContextIsActive() still rejects delivery after leaving the gameplay
+  // context or switching workspace.
+  const ownsHyprlandDialog = hyprlandOverlayActive() && overlayVisibleForEscape
+  const desired =
+    !!onEscape &&
+    overlayVisibleForEscape &&
+    (OverlayController.targetHasFocus || ownsHyprlandDialog) &&
+    !hotkeysAreSuspended()
   if (desired === escapeShortcutRegistered) return
   if (desired) {
     try {
@@ -413,6 +423,20 @@ function hotkeyContextIsActive(): boolean {
     hyprlandInputAllowed() &&
     !hotkeysAreSuspended() &&
     (OverlayController.targetHasFocus || isAnyScalpelBrowserWindowFocused())
+  )
+}
+
+/** Escape must remain usable during Hyprland's PoE -> XWayland overlay focus
+ * handoff. Electron can report neither window focused until the first pointer
+ * interaction, while Hyprland already considers the visible overlay part of
+ * the active game context. Other hotkeys retain the stricter focus gate. */
+function escapeContextIsActive(): boolean {
+  return (
+    hyprlandInputAllowed() &&
+    !hotkeysAreSuspended() &&
+    (OverlayController.targetHasFocus ||
+      isAnyScalpelBrowserWindowFocused() ||
+      (hyprlandOverlayActive() && overlayVisibleForEscape))
   )
 }
 
