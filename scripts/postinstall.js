@@ -5,7 +5,7 @@
 //     error, which trips one of our native-module deps (uiohook-napi).
 //     Pass -Wno-error=incompatible-pointer-types via CFLAGS/CXXFLAGS to
 //     downgrade it back to a warning so the rebuild completes. Linux also
-//     force-rebuilds both native addons from the patched source (see the block
+//     force-rebuilds uiohook-napi from the patched source (see the block
 //     below) since its N-API prebuilt would otherwise mask the patch.
 //   - Windows/macOS: invoke electron-rebuild with no extra flags.
 //
@@ -34,8 +34,8 @@ if (process.platform === 'linux') {
   env.CXXFLAGS = env.CXXFLAGS ? `${env.CXXFLAGS} ${flag}` : flag
 }
 
-// Apply the libuiohook keyboard/priority and overlay shutdown patches BEFORE
-// electron-rebuild compiles the native addons.
+// Apply the libuiohook keyboard and priority patches BEFORE electron-rebuild
+// compiles the native addon.
 // shell: true resolves the .bin shim cross-platform, same as electron-rebuild.
 const patch = spawnSync('patch-package', { stdio: 'inherit', shell: true, env })
 const patchStatus = patch.status ?? 1
@@ -55,16 +55,14 @@ if (rebuildStatus !== 0) {
   process.exit(rebuildStatus)
 }
 
-// ABI-stable N-API prebuilts can mask our native source patches. Linux needs
-// both the libuiohook fixes and the overlay stop-before-start fix: drop prebuilts and
+// uiohook-napi's ABI-stable N-API prebuilt can mask our native source patches.
+// Linux needs the libuiohook fixes, so drop its prebuilt and
 // force a from-source rebuild, making the patched build/Release the binary
 // node-gyp-build loads. (Fail loud rather than silently shipping the unpatched
 // prebuilt.)
 if (process.platform === 'linux') {
-  for (const name of ['uiohook-napi', 'electron-overlay-window']) {
-    rmSync(`node_modules/${name}/prebuilds`, { recursive: true, force: true })
-  }
-  const forced = spawnSync('electron-rebuild', ['-f', '-o', 'uiohook-napi,electron-overlay-window'], {
+  rmSync('node_modules/uiohook-napi/prebuilds', { recursive: true, force: true })
+  const forced = spawnSync('electron-rebuild', ['-f', '-o', 'uiohook-napi'], {
     stdio: 'inherit',
     shell: true,
     env,
