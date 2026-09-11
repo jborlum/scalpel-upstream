@@ -8,11 +8,14 @@ const mock = vi.hoisted(() => ({
   focus: vi.fn(),
   unmap: vi.fn(),
   allowed: true,
+  panelFocus: vi.fn(),
+  pointer: { x: 150, y: 150 },
+  secondary: null as any,
 }))
 vi.mock('electron', () => ({
   BrowserWindow: class {
-    static fromWebContents() {
-      return window
+    static fromWebContents(sender: { id: number }) {
+      return sender.id === 2 ? mock.secondary : window
     }
     setIgnoreMouseEvents = mock.ignore
     webContents = { send: vi.fn(), id: 1 }
@@ -57,6 +60,9 @@ vi.mock('./hyprland', () => ({
   hyprlandInputAllowed: () => mock.allowed,
   nameHyprlandOverlay: vi.fn(),
   attachHyprlandOverlay: vi.fn(),
+  focusHyprlandPanel: mock.panelFocus,
+  getHyprlandPointerPhysical: () => mock.pointer,
+  getHyprlandGameBounds: () => ({ x: 0, y: 0, width: 1000, height: 800 }),
 }))
 vi.mock('./diagnostics', () => ({
   guardNativeListener: (_: string, cb: any) => cb,
@@ -138,5 +144,29 @@ describe('Hyprland manual dialog focus', () => {
     showOverlay()
     expect(window.isVisible()).toBe(true)
     expect(mock.activate).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('Hyprland annotation interaction', () => {
+  it('focuses a secondary panel on hover and returns focus to the game on exit', async () => {
+    vi.useFakeTimers()
+    mock.allowed = true
+    mock.secondary = { isDestroyed: () => false, isVisible: () => true, setIgnoreMouseEvents: vi.fn() }
+    mock.panelFocus.mockClear()
+    mock.focus.mockClear()
+    mock.ipc['report-panel-rect']({ sender: { id: 2 } }, { left: 100, top: 100, width: 200, height: 200 })
+    mock.pointer = { x: 150, y: 150 }
+    await vi.advanceTimersByTimeAsync(100)
+    mock.mouse.mousemove({ x: 2500, y: 2500 })
+    expect(mock.panelFocus).toHaveBeenCalledWith(mock.secondary)
+    expect(mock.secondary.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false)
+    await vi.advanceTimersByTimeAsync(40)
+    mock.pointer = { x: 900, y: 700 }
+    mock.mouse.mousemove({ x: 150, y: 150 })
+    await vi.advanceTimersByTimeAsync(60)
+    expect(mock.secondary.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true)
+    expect(mock.focus).toHaveBeenCalledOnce()
+    mock.ipc['clear-panel-rect']({ sender: { id: 2 } })
+    vi.useRealTimers()
   })
 })

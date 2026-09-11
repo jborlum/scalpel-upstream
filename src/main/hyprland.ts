@@ -16,6 +16,32 @@ import { hyprlandFocusScript } from './hyprland-focus'
 const isHyprland = process.platform === 'linux' && !!process.env.HYPRLAND_INSTANCE_SIGNATURE
 const exec = promisify(execFile)
 let game: HyprClient | null = null
+let gameDipBounds: Electron.Rectangle | null = null
+
+export function getHyprlandGame(): HyprClient | null {
+  return game
+}
+
+export function getHyprlandGameBounds(): Electron.Rectangle | null {
+  return gameDipBounds
+}
+
+/** uiohook's XWayland coordinates need not be physical monitor pixels. Match
+ * pointer hit testing to the same compositor geometry used for annotations. */
+export function getHyprlandPointerPhysical(): Electron.Point | null {
+  const bounds = OverlayController.targetBounds
+  if (!game || !bounds?.width || game.size[0] <= 0 || game.size[1] <= 0) return null
+  try {
+    const point = JSON.parse(execFileSync('hyprctl', ['-j', 'cursorpos'], { encoding: 'utf8', timeout: 500 }))
+    return {
+      x: bounds.x + ((point.x - game.at[0]) * bounds.width) / game.size[0],
+      y: bounds.y + ((point.y - game.at[1]) * bounds.height) / game.size[1],
+    }
+  } catch {
+    return null
+  }
+}
+
 let tracking = false
 let overlayActive: boolean | null = null
 
@@ -58,6 +84,23 @@ export function nameHyprlandOverlay(win: BrowserWindow): void {
     event.preventDefault()
     win.setTitle(`Scalpel Overlay: ${title}`)
   })
+}
+
+/** Secondary annotation panels need the same pointer + keyboard handoff as
+ * the main dialog. Changing the X11 input shape alone does not transfer
+ * Hyprland's pointer focus away from the fullscreen game. */
+export function focusHyprlandPanel(win: BrowserWindow): void {
+  if (!hyprlandInputAllowed() || !game || win.isDestroyed()) return
+  try {
+    const clients: HyprClient[] = JSON.parse(
+      execFileSync('hyprctl', ['-j', 'clients'], { encoding: 'utf8', timeout: 1000 }),
+    )
+    const target = clients.find((c) => c.pid === process.pid && c.title === win.getTitle())
+    if (!target) return
+    execFileSync('hyprctl', ['eval', hyprlandFocusScript(target.address, game.address, process.pid)], { timeout: 1000 })
+  } catch (error) {
+    console.warn('[hyprland] annotation focus handoff failed:', String(error))
+  }
 }
 
 /** Hyprland owns workspace, focus and logical geometry. Avoid the native X11
@@ -131,6 +174,7 @@ export function attachHyprlandOverlay(win: BrowserWindow, initialTitles: string[
         clients.find((c) => titles.includes(c.title)) ??
         null
       if (!game) {
+        gameDipBounds = null
         if (lastAddress) OverlayController.events.emit('detach')
         lastAddress = ''
         lastGeometry = ''
@@ -144,6 +188,7 @@ export function attachHyprlandOverlay(win: BrowserWindow, initialTitles: string[
           screen.getAllDisplays().find((d) => d.label === monitor.name) ??
           screen.getDisplayNearestPoint({ x: monitor.x, y: monitor.y })
         const { dip: bounds, physical } = hyprlandOverlayBounds(game, monitor, display)
+        gameDipBounds = bounds
         const geometry = JSON.stringify(bounds)
         if (game.address !== lastAddress) {
           OverlayController.events.emit('attach', { ...physical, titleIndex: titles.indexOf(game.title) })
@@ -193,6 +238,7 @@ export function attachHyprlandOverlay(win: BrowserWindow, initialTitles: string[
       }
     } catch (error) {
       game = null
+      gameDipBounds = null
       if (lastContextActive || lastFocused || OverlayController.targetHasFocus) OverlayController.events.emit('blur')
       lastFocused = false
       lastContextActive = false
@@ -209,6 +255,7 @@ export function attachHyprlandOverlay(win: BrowserWindow, initialTitles: string[
     if (timer) clearTimeout(timer)
     socket.destroy()
     game = null
+    gameDipBounds = null
   }
   win.once('closed', stop)
   app.once('before-quit', stop)
