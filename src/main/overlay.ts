@@ -13,7 +13,15 @@ import { getWhiteboardOverlay } from './whiteboard'
 import { POE_SIDEBAR_RATIO } from '@shared/poe-geometry'
 import { GAME_TITLES } from '@shared/contracts/game-variant'
 import { IPC_CHANNELS } from '@shared/contracts/ipc'
-import { attachHyprlandOverlay, hyprlandInputAllowed, hyprlandOverlayActive, nameHyprlandOverlay } from './hyprland'
+import {
+  attachHyprlandOverlay,
+  focusHyprlandPanel,
+  getHyprlandPointerPhysical,
+  getHyprlandGameBounds,
+  hyprlandInputAllowed,
+  hyprlandOverlayActive,
+  nameHyprlandOverlay,
+} from './hyprland'
 
 let overlayWindow: BrowserWindow | null = null
 let unmapHyprlandDialog: (() => void) | null = null
@@ -96,6 +104,10 @@ function getScaleFactor(): number {
   // Multi-monitor setups with different DPIs need the correct scale factor.
   const tb = OverlayController.targetBounds
   if (tb?.width) {
+    if (hyprlandOverlayActive()) {
+      const dip = getHyprlandGameBounds()
+      if (dip?.width) return tb.width / dip.width
+    }
     return screen.getDisplayNearestPoint({ x: tb.x + tb.width / 2, y: tb.y + tb.height / 2 }).scaleFactor
   }
   return screen.getPrimaryDisplay().scaleFactor
@@ -120,6 +132,7 @@ ipcMain.on('report-panel-rect', (event, payload: unknown) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win) return
   panelRectsBySender.set(event.sender.id, { win, rects: phys })
+  if (phys.length === 0 && currentInteractiveWindow === win) setInteractiveWindow(null)
 })
 
 ipcMain.on('clear-panel-rect', (event) => {
@@ -185,6 +198,7 @@ function setInteractiveWindow(win: BrowserWindow | null): void {
   if (currentInteractiveWindow === win) return
   // Revert prior window to click-through.
   const prev = currentInteractiveWindow
+  if (!win && prev && hyprlandOverlayActive()) OverlayController.focusTarget()
   if (prev && !prev.isDestroyed()) {
     try {
       prev.setIgnoreMouseEvents(true)
@@ -201,12 +215,14 @@ function setInteractiveWindow(win: BrowserWindow | null): void {
     // exposes activateOverlay() for exactly this (it runs the native lib.activateOverlay()
     // on Linux). Only the attached main overlay can be activated this way, so secondary
     // windows (whiteboard, cheat sheets) fall outside this path. See issue #30.
-    if (process.platform === 'linux' && win === overlayWindow) {
+    if (hyprlandOverlayActive() && win !== overlayWindow) {
+      focusHyprlandPanel(win)
+    } else if (process.platform === 'linux' && win === overlayWindow) {
       try {
         OverlayController.activateOverlay()
       } catch {}
     }
-  } else if (process.platform === 'linux' && prev === overlayWindow) {
+  } else if (process.platform === 'linux' && !hyprlandOverlayActive() && prev === overlayWindow) {
     // Cursor left the main overlay: hand native input focus back to PoE so the
     // game keeps receiving input (mirrors the focusTarget() handoff hideOverlay uses).
     try {
@@ -231,17 +247,38 @@ function setInteractive(interactive: boolean): void {
 // Track mouse position via uiohook to toggle click-through
 // Debounce exit to prevent flickering at DPI-scaled boundaries
 let exitTimer: ReturnType<typeof setTimeout> | null = null
+let lastHyprlandPointerCheck = 0
+let hyprlandPointerTimer: ReturnType<typeof setTimeout> | null = null
 
 uIOhook.on(
   'mousemove',
-  guardNativeListener('mousemove', (e) => {
+  guardNativeListener('mousemove', function trackPointer(e) {
     // A dialog owns input until explicitly dismissed. Hit-test updates can lag
     // behind dragging; neither leaving a rect nor stale geometry may release it.
     if (hyprlandOverlayActive() && overlayVisible) return
     // No rects reported yet -- skip hit testing. (Whiteboard registers its own
     // rects independently of the main overlay's `overlayVisible` flag.)
     if (panelRectsBySender.size === 0) return
-    const winUnder = windowAtPoint(e.x, e.y)
+    let point = e
+    if (hyprlandOverlayActive()) {
+      // Limit compositor queries for high polling-rate gaming mice.
+      const elapsed = Date.now() - lastHyprlandPointerCheck
+      if (elapsed < 32) {
+        // Sample once more after the last motion event, even if the pointer
+        // stops immediately upon entering a button or drag grip.
+        if (!hyprlandPointerTimer)
+          hyprlandPointerTimer = setTimeout(() => {
+            hyprlandPointerTimer = null
+            trackPointer(e)
+          }, 32 - elapsed)
+        return
+      }
+      lastHyprlandPointerCheck = Date.now()
+      const cursor = getHyprlandPointerPhysical()
+      if (!cursor) return
+      point = { ...e, ...cursor }
+    }
+    const winUnder = windowAtPoint(point.x, point.y)
     if (winUnder) {
       if (exitTimer) {
         clearTimeout(exitTimer)
