@@ -1,3 +1,4 @@
+import { mapPointBetweenRects } from './desktop/coordinates'
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createConnection } from 'node:net'
@@ -44,6 +45,7 @@ export function getHyprlandPointerPhysical(): Electron.Point | null {
 
 let tracking = false
 let overlayActive: boolean | null = null
+let requestWindowFocus: ((win: BrowserWindow) => void) | null = null
 
 /** Whether to drive the compositor instead of the native X11 tracker. Resolved
  *  once, on first use: the version query costs a subprocess, and Hyprland can't
@@ -86,20 +88,45 @@ export function nameHyprlandOverlay(win: BrowserWindow): void {
   })
 }
 
-/** Secondary annotation panels need the same pointer + keyboard handoff as
- * the main dialog. Changing the X11 input shape alone does not transfer
- * Hyprland's pointer focus away from the fullscreen game. */
+/** All interactive overlays share the mapping-aware focus retry loop. */
 export function focusHyprlandPanel(win: BrowserWindow): void {
-  if (!hyprlandInputAllowed() || !game || win.isDestroyed()) return
+  requestWindowFocus?.(win)
+}
+
+/** The cursor and game bounds use the same Electron-DIP coordinate space. */
+export function getHyprlandCursorDip(): Electron.Point | null {
+  const physical = getHyprlandPointerPhysical()
+  const bounds = OverlayController.targetBounds
+  return physical && bounds && gameDipBounds ? mapPointBetweenRects(physical, bounds, gameDipBounds) : null
+}
+
+export function warpHyprlandCursor(point: Electron.Point): void {
+  if (!game || !gameDipBounds || !hyprlandInputAllowed()) return
+  const target = mapPointBetweenRects(point, gameDipBounds, {
+    x: game.at[0],
+    y: game.at[1],
+    width: game.size[0],
+    height: game.size[1],
+  })
+  if (!target || !/^0x[0-9a-f]+$/i.test(game.address)) return
+  // Only a still-focused game may receive an item-targeting cursor warp.
+  // Recheck inside the compositor to avoid pulling the pointer out of an app
+  // the user switched to while a menu action was finishing.
   try {
-    const clients: HyprClient[] = JSON.parse(
-      execFileSync('hyprctl', ['-j', 'clients'], { encoding: 'utf8', timeout: 1000 }),
+    execFileSync(
+      'hyprctl',
+      [
+        'eval',
+        `
+local active = hl.get_active_window()
+if not active or active.address ~= "${game.address}" then return end
+hl.dispatch(hl.dsp.cursor.move({ x = ${Math.round(target.x)}, y = ${Math.round(target.y)} }))
+`,
+      ],
+      { timeout: 1000 },
     )
-    const target = clients.find((c) => c.pid === process.pid && c.title === win.getTitle())
-    if (!target) return
-    execFileSync('hyprctl', ['eval', hyprlandFocusScript(target.address, game.address, process.pid)], { timeout: 1000 })
   } catch (error) {
-    console.warn('[hyprland] annotation focus handoff failed:', String(error))
+    console.warn('[hyprland] cursor restore failed:', String(error))
   }
 }
 
@@ -109,6 +136,7 @@ export function attachHyprlandOverlay(win: BrowserWindow, initialTitles: string[
   tracking = true
   let titles = initialTitles
   let lastAddress = ''
+  let requestedWindow = win
   let overlayAddress = ''
   let focusRequestedUntil = 0
   let focusConfirmedSince = 0
@@ -125,15 +153,17 @@ export function attachHyprlandOverlay(win: BrowserWindow, initialTitles: string[
     const result = await exec('hyprctl', ['dispatch', expression], { timeout: 1000 })
     if (result.stdout.startsWith('error:')) throw new Error(result.stdout)
   }
-  OverlayController.activateOverlay = () => {
-    if (!hyprlandInputAllowed() || win.isDestroyed()) return
+  requestWindowFocus = (target) => {
+    if (!hyprlandInputAllowed() || target.isDestroyed()) return
+    requestedWindow = target
     focusRequestedUntil = Date.now() + 1500
     focusConfirmedSince = 0
-    win.setIgnoreMouseEvents(false)
+    target.setIgnoreMouseEvents(false)
     if (timer) clearTimeout(timer)
     if (busy) dirty = true
     else timer = setTimeout(poll, 0)
   }
+  OverlayController.activateOverlay = () => requestWindowFocus?.(win)
   OverlayController.focusTarget = () => {
     focusRequestedUntil = 0
     focusConfirmedSince = 0
@@ -166,7 +196,9 @@ export function attachHyprlandOverlay(win: BrowserWindow, initialTitles: string[
       ])
       if (stopped || win.isDestroyed()) return
       const clients: HyprClient[] = JSON.parse(clientResult.stdout)
-      overlayAddress = clients.find((c) => c.pid === process.pid && c.title === win.getTitle())?.address ?? ''
+      overlayAddress = requestedWindow.isDestroyed()
+        ? ''
+        : (clients.find((c) => c.pid === process.pid && c.title === requestedWindow.getTitle())?.address ?? '')
       const active: HyprClient = JSON.parse(activeResult.stdout)
       game =
         clients.find((c) => c.address === active.address && titles.includes(c.title)) ??
@@ -225,11 +257,17 @@ export function attachHyprlandOverlay(win: BrowserWindow, initialTitles: string[
       lastFocused = focused
       lastContextActive = contextActive
       if (!contextActive) focusRequestedUntil = 0
-      if (active.address === overlayAddress && win.isFocused()) {
+      if (active.address === overlayAddress && !requestedWindow.isDestroyed() && requestedWindow.isFocused()) {
         focusConfirmedSince ||= Date.now()
         if (Date.now() - focusConfirmedSince >= 100) focusRequestedUntil = 0
       } else focusConfirmedSince = 0
-      if (focusRequestedUntil > Date.now() && overlayAddress && game && win.isVisible()) {
+      if (
+        focusRequestedUntil > Date.now() &&
+        overlayAddress &&
+        game &&
+        !requestedWindow.isDestroyed() &&
+        requestedWindow.isVisible()
+      ) {
         // Never trust Electron's cached X11 focus. Resolve the compositor window
         // after mapping/workspace placement and check context again inside Lua.
         execFileSync('hyprctl', ['eval', hyprlandFocusScript(overlayAddress, game.address, process.pid)], {
@@ -252,6 +290,7 @@ export function attachHyprlandOverlay(win: BrowserWindow, initialTitles: string[
   }
   const stop = () => {
     stopped = true
+    requestWindowFocus = null
     if (timer) clearTimeout(timer)
     socket.destroy()
     game = null
