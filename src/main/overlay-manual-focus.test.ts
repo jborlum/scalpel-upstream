@@ -84,6 +84,7 @@ vi.mock('./windowing', () => ({
 vi.mock('./whiteboard', () => ({ getWhiteboardOverlay: () => null }))
 
 import { createOverlayWindow, hideOverlay, showOverlay, setCloseOnClickOutside } from './overlay'
+import { desktop } from './desktop'
 let window: ReturnType<typeof createOverlayWindow>
 
 describe('Hyprland manual dialog focus', () => {
@@ -166,6 +167,32 @@ describe('Hyprland annotation interaction', () => {
     await vi.advanceTimersByTimeAsync(60)
     expect(mock.secondary.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true)
     expect(mock.focus).toHaveBeenCalledOnce()
+    mock.ipc['clear-panel-rect']({ sender: { id: 2 } })
+    vi.useRealTimers()
+  })
+  it('keeps a radial dialog focused when an annotation hover-exit timer fires', async () => {
+    vi.useFakeTimers()
+    mock.allowed = true
+    mock.secondary = { isDestroyed: () => false, isVisible: () => true, setIgnoreMouseEvents: vi.fn() }
+    mock.ipc['report-panel-rect']({ sender: { id: 2 } }, { left: 100, top: 100, width: 200, height: 200 })
+    mock.pointer = { x: 150, y: 150 }
+    await vi.advanceTimersByTimeAsync(200)
+    mock.mouse.mousemove(mock.pointer)
+    await vi.advanceTimersByTimeAsync(40)
+    mock.pointer = { x: 900, y: 700 }
+    mock.mouse.mousemove(mock.pointer)
+    const dialog = {
+      isDestroyed: () => false,
+      isVisible: () => true,
+      isFocused: () => false,
+      setIgnoreMouseEvents: vi.fn(),
+    } as unknown as Electron.BrowserWindow
+    desktop.applyInteraction(dialog, 'dialog')
+    mock.focus.mockClear()
+    await vi.advanceTimersByTimeAsync(60)
+    expect(mock.focus).not.toHaveBeenCalled()
+    expect(mock.secondary.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true)
+    desktop.releaseOverlay(dialog)
     mock.ipc['clear-panel-rect']({ sender: { id: 2 } })
     vi.useRealTimers()
   })

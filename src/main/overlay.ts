@@ -1,3 +1,4 @@
+import { desktop } from './desktop'
 import { join } from 'node:path'
 import { BrowserWindow, ipcMain, screen, webContents } from 'electron'
 import { OVERLAY_WINDOW_OPTS, OverlayController } from 'electron-overlay-window'
@@ -15,9 +16,7 @@ import { GAME_TITLES } from '@shared/contracts/game-variant'
 import { IPC_CHANNELS } from '@shared/contracts/ipc'
 import {
   attachHyprlandOverlay,
-  focusHyprlandPanel,
   getHyprlandPointerPhysical,
-  getHyprlandGameBounds,
   hyprlandInputAllowed,
   hyprlandOverlayActive,
   nameHyprlandOverlay,
@@ -105,7 +104,7 @@ function getScaleFactor(): number {
   const tb = OverlayController.targetBounds
   if (tb?.width) {
     if (hyprlandOverlayActive()) {
-      const dip = getHyprlandGameBounds()
+      const dip = desktop.getGameBounds()
       if (dip?.width) return tb.width / dip.width
     }
     return screen.getDisplayNearestPoint({ x: tb.x + tb.width / 2, y: tb.y + tb.height / 2 }).scaleFactor
@@ -193,6 +192,14 @@ let currentInteractiveWindow: BrowserWindow | null = null
  *  Setting a different window to interactive automatically reverts the prior
  *  one to click-through, so we never end up with two windows competing. */
 function setInteractiveWindow(win: BrowserWindow | null): void {
+  if (hyprlandOverlayActive() && desktop.hasInteractiveDialog() && win !== overlayWindow) {
+    // A pending hover-exit timer or stale annotation region must not steal
+    // focus from a newly opened radial menu or whiteboard editor.
+    const prev = currentInteractiveWindow
+    currentInteractiveWindow = null
+    if (prev && !prev.isDestroyed()) prev.setIgnoreMouseEvents(true)
+    return
+  }
   if (hyprlandOverlayActive() && overlayVisible && win !== overlayWindow) return
   if (!hyprlandInputAllowed()) return
   if (currentInteractiveWindow === win) return
@@ -216,7 +223,7 @@ function setInteractiveWindow(win: BrowserWindow | null): void {
     // on Linux). Only the attached main overlay can be activated this way, so secondary
     // windows (whiteboard, cheat sheets) fall outside this path. See issue #30.
     if (hyprlandOverlayActive() && win !== overlayWindow) {
-      focusHyprlandPanel(win)
+      desktop.focusOverlay(win)
     } else if (process.platform === 'linux' && win === overlayWindow) {
       try {
         OverlayController.activateOverlay()
@@ -256,6 +263,10 @@ uIOhook.on(
     // A dialog owns input until explicitly dismissed. Hit-test updates can lag
     // behind dragging; neither leaving a rect nor stale geometry may release it.
     if (hyprlandOverlayActive() && overlayVisible) return
+    if (hyprlandOverlayActive() && desktop.hasInteractiveDialog()) {
+      setInteractiveWindow(null)
+      return
+    }
     // No rects reported yet -- skip hit testing. (Whiteboard registers its own
     // rects independently of the main overlay's `overlayVisible` flag.)
     if (panelRectsBySender.size === 0) return
