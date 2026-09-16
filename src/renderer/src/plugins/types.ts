@@ -60,4 +60,5 @@ export type PluginContextFactoryDeps = {
   registerOverlay: (pluginId: string, opts: import('../../../plugin-sdk/src/types').RegisterOverlayOptions) => void
   openOverlay: (pluginId: string) => void
   closeOverlay: (pluginId: string) => void
+  isOverlayVisible: (pluginId: string) => Promise<boolean>
 }

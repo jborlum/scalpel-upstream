@@ -79,6 +79,7 @@ export function useActivatePlugin(
           void window.api.pluginCloseOverlay(pluginId)
         },
         onOverlayVisibility: (h) => window.api.onPluginOverlayVisibility(h),
+        isOverlayVisible: () => window.api.pluginOverlayVisible(pluginId),
         setInteractiveRegion: (rect) => {
           if (onInteractiveRegion) {
             onInteractiveRegion(rect)

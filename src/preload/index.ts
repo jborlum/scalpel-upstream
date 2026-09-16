@@ -1048,6 +1048,8 @@ export const api = {
       defaultPosition?: { fracX: number; fracY: number }
       snapPositions?: { fracX: number; fracY: number }[]
       mode?: 'window' | 'annotation'
+      dismissOnEscape?: boolean
+      dismissOnGameClick?: boolean
     },
   ): Promise<void> => ipcRenderer.invoke('plugins:register-overlay', pluginId, opts),
   pluginOpenOverlay: (pluginId: string): Promise<void> => ipcRenderer.invoke('plugins:open-overlay', pluginId),
