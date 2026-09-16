@@ -34,8 +34,8 @@ if (process.platform === 'linux') {
   env.CXXFLAGS = env.CXXFLAGS ? `${env.CXXFLAGS} ${flag}` : flag
 }
 
-// Apply patches to vendored native source (libuiohook XkbGetKeyboard fix, see
-// patches/uiohook-napi+1.5.4.patch) BEFORE electron-rebuild compiles them.
+// Apply the libuiohook keyboard and priority patches BEFORE electron-rebuild
+// compiles the native addon.
 // shell: true resolves the .bin shim cross-platform, same as electron-rebuild.
 const patch = spawnSync('patch-package', { stdio: 'inherit', shell: true, env })
 const patchStatus = patch.status ?? 1
@@ -55,9 +55,8 @@ if (rebuildStatus !== 0) {
   process.exit(rebuildStatus)
 }
 
-// uiohook-napi ships an ABI-stable N-API prebuilt, so electron-rebuild leaves it
-// untouched and the patched libuiohook source (patches/uiohook-napi+1.5.4.patch)
-// never compiles. Only Linux needs the patch, so there: drop the prebuilt and
+// uiohook-napi's ABI-stable N-API prebuilt can mask our native source patches.
+// Linux needs the libuiohook fixes, so drop its prebuilt and
 // force a from-source rebuild, making the patched build/Release the binary
 // node-gyp-build loads. (Fail loud rather than silently shipping the unpatched
 // prebuilt.)
