@@ -24,12 +24,17 @@ export function getGameBounds(win: BrowserWindow | null = null): Electron.Rectan
   const tb = OverlayController.targetBounds
   if (!tb || tb.width <= 0 || tb.height <= 0) return null
   if (process.platform === 'win32') return screen.screenToDipRect(win, tb)
-  const point = screen.screenToDipPoint({ x: tb.x, y: tb.y })
-  const display = screen.getDisplayNearestPoint(point)
+  if (process.platform !== 'linux') return { x: tb.x, y: tb.y, width: tb.width, height: tb.height }
+  // Electron 32 exposes neither screenToDipPoint nor screenToDipRect on Linux.
+  // Match the native overlay tracker's Linux conversion so secondary windows
+  // and cursor hit testing use the same DIP rectangle as the main overlay.
+  const display = screen.getDisplayNearestPoint({ x: tb.x, y: tb.y })
+  const scaleFactor = display.scaleFactor || 1
   return {
-    ...point,
-    width: Math.round(tb.width / display.scaleFactor),
-    height: Math.round(tb.height / display.scaleFactor),
+    x: Math.round(tb.x / scaleFactor),
+    y: Math.round(tb.y / scaleFactor),
+    width: Math.round(tb.width / scaleFactor),
+    height: Math.round(tb.height / scaleFactor),
   }
 }
 
