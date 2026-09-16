@@ -87,6 +87,7 @@ const EXPECTED_SDK_EXPORTS = [
 const EXPECTED_CONTEXT_KEYS = [
   'captureGameWindow',
   'closeOverlay',
+  'isOverlayVisible',
   'copyAndEvaluateItem',
   'fetch',
   'gameConfig',
@@ -165,6 +166,7 @@ function stubDeps(): PluginContextFactoryDeps {
     registerOverlay: () => {},
     openOverlay: () => {},
     closeOverlay: () => {},
+    isOverlayVisible: async () => false,
   }
 }
 

@@ -43,6 +43,10 @@ export interface RegisterTabOptions {
 }
 
 export interface RegisterOverlayOptions {
+  /** Allow transient annotation results to be dismissed by the game's Escape key. Default false. */
+  dismissOnEscape?: boolean
+  /** Dismiss transient annotation results when clicking the game outside Scalpel controls. */
+  dismissOnGameClick?: boolean
   /** Shown in the overlay window's chrome title bar. */
   title: string
   /**
@@ -269,6 +273,8 @@ export interface ScalpelPluginContext {
 
   /** Close (hide) this plugin's overlay window. No-op if not open / none registered. */
   closeOverlay(): void
+  /** Whether this plugin's overlay is currently visible. */
+  isOverlayVisible(): Promise<boolean>
 
   /**
    * Subscribe to this plugin's overlay window being opened or closed. Returns
