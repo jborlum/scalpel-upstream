@@ -145,6 +145,7 @@ function stubDeps(): PluginContextFactoryDeps {
       onChange: () => () => {},
     },
     prices: {
+      getSkillPrice: async () => null,
       getPrices: async () => ({ prices: [], updatedAt: null }),
       refresh: async () => {},
       onChange: () => () => {},

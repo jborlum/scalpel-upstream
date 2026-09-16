@@ -111,6 +111,7 @@ export function useActivatePlugin(
           onChange: (handler: () => void) => window.api.onGameConfigChange(handler),
         },
         prices: {
+          getSkillPrice: (name, level) => window.api.pricesGetSkill(name, level),
           getPrices: (opts) => window.api.pricesGet(opts),
           refresh: () => window.api.pricesRefresh(),
           onChange: (handler) => window.api.onPricesChange(handler),

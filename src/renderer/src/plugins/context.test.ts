@@ -39,6 +39,7 @@ const baseDeps = () => ({
     onChange: vi.fn(() => () => {}),
   },
   prices: {
+    getSkillPrice: vi.fn(async () => null),
     getPrices: vi.fn(async () => ({ prices: [], updatedAt: null })),
     refresh: vi.fn(async () => undefined),
     onChange: vi.fn(() => () => {}),

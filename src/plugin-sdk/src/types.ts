@@ -144,6 +144,8 @@ export interface GameCapture {
 }
 
 export interface PricesApi {
+  /** Cached PoE2 asking-price estimate for a zero-quality, uncorrupted skill at an exact level. */
+  getSkillPrice(name: string, level: number): Promise<(PriceEntry & { sampleSize: number; updatedAt: number }) | null>
   /**
    * Read the current poe.ninja price snapshot for the detected game + league.
    * Pass `category` to scope the result (e.g. `'currency'`); omit it for every
